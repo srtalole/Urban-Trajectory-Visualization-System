@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      #tooltip {
+        color: white;
+        opacity: .9;
+        background: #333;
+        padding: 5px;
+        border: 1px solid lightgrey;
+        border-radius: 5px;
+        position: absolute;
+        z-index: 10;
+        visibility: hidden;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      #circle circle {
+        fill: none;
+        pointer-events: all;
+      }
+      path.group {
+        fill-opacity: .8;
+      }
+      path.chord {
+        fill-opacity: .8;
+        stroke: #000;
+        stroke-width: .25px;
+      }
+      #circle:hover path.fade {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="tooltip"></div>
+    <script src="lib/d3.js"></script>
+    <script src="lib/queue.js"></script>
+    <script src="lib/underscore.js"></script>
+    <script src="js/mapper.js"></script>
+	<script src="http://underscorejs.org/underscore-min.js"></script>
+    <script>
+
+	var matrix = [];
+	var temp = [];
+	 queue()
+        .defer(d3.json, 'data/trips.json')
+        .await(function(err, trips) { 
+          if (err) console.log(err);
+         _.each(trips.features, function(feature) {
+			//Creating an array with first street name in each feature as pickup point and last street name as drop-off point:
+			var startPoint = feature.properties.streetnames[0];
+			var lastPoint = _.last(feature.properties.streetnames);
+			//verifying if the pickup and dropoff points are already present in the array. If so, incrementing the counter, else pushing into the array//
+			var idx = _.findIndex(temp, item => item.start == startPoint && item.last == lastPoint);
+			if(idx==-1)
+				temp.push({start: startPoint,  last: lastPoint, count : 1});
+			else
+				temp[idx].count++;
+			});
+			
+			//Taking top 150 frequently used pickup and drop-off points//
+			var mostRoutes = _.last(_.sortBy(temp, 'count'), 150);
+			
+			var freqLocations = _.union(_.map(mostRoutes, item => item.start), _.map(mostRoutes, item => item.last))
+			
+			//creating a matrix for all the locations and its frequency of occurrence:
+			matrix = [];
+			var finalItemCount = freqLocations.length;
+		
+	// Creates all lines:
+			for(var i=0; i < finalItemCount ; i++){
+				matrix.push([]);
+				matrix[i].push( new Array(finalItemCount));
+				for(var j=0; j < finalItemCount ; j++){
+					matrix[i][j] = 0;
+				}
+			}
+			var locationMap = _.map(freqLocations, function (item, index) {
+				return { name: item, 
+						 id : index,
+						 data: '#'+(0x1000000+(Math.random())*0xffffff).toString(16).substr(1,6)
+				};
+			});
+			
+			_.each(mostRoutes, function(routeInfo){
+				var rowIndex =  _.findIndex(locationMap, item => item.name == routeInfo.start);
+				var colIndex =  _.findIndex(locationMap, item => item.name == routeInfo.last);
+				matrix[rowIndex][colIndex] = routeInfo.count;
+			});
+					
+			console.log(locationMap);
+			console.log(matrix);
+			drawChords( matrix, locationMap);
+	
+			
+			});
+			
+			
+			
+		
+	
+	
+	//Reading Taxi Data
+	
+//	console.log(matrix);
+	
+      //*******************************************************************
+      //  CREATE MATRIX AND MAP
+      //*******************************************************************
+      <!-- queue() -->
+        <!-- .defer(d3.json, 'data/Taxi-matrix.json') -->
+        <!-- .defer(d3.csv, 'data/Taxi-cities.csv') -->
+        <!-- .await(function(err, matrix, mmap) {  -->
+          <!-- if (err) console.log(err); -->
+          <!-- _.each(mmap, function (d, i) { d.id=i; d.data=d.color }) -->
+          <!-- drawChords(matrix, mmap); -->
+        <!-- }); -->
+      //*******************************************************************
+      //  DRAW THE CHORD DIAGRAM
+      //*******************************************************************
+      function drawChords (matrix, mmap) {
+        var w = 800, h = 800, r1 = h / 2, r0 = r1 - 110;
+
+        var chord = d3.layout.chord()
+            .padding(.02)
+            .sortSubgroups(d3.descending)
+            .sortChords(d3.descending);
+
+        var arc = d3.svg.arc()
+            .innerRadius(r0)
+            .outerRadius(r0 + 20);
+
+        var svg = d3.select("body").append("svg:svg")
+            .attr("width", w)
+            .attr("height", h)
+          .append("svg:g")
+            .attr("id", "circle")
+            .attr("transform", "translate(" + w / 2 + "," + h / 2 + ")");
+
+            svg.append("circle")
+                .attr("r", r0 + 20);
+
+        var rdr = chordRdr(matrix, mmap);
+        chord.matrix(matrix);
+
+        var g = svg.selectAll("g.group")
+            .data(chord.groups())
+          .enter().append("svg:g")
+            .attr("class", "group")
+            .on("mouseover", mouseover)
+            .on("mouseout", function (d) { d3.select("#tooltip").style("visibility", "hidden") });
+
+        g.append("svg:path")
+            .style("stroke", "grey")
+            .style("fill", function(d) { return rdr(d).gdata; })
+            .attr("d", arc);
+
+        g.append("svg:text")
+            .each(function(d) { d.angle = (d.startAngle + d.endAngle) / 2; })
+            .attr("dy", ".35em")
+            .style("font-family", "helvetica, arial, sans-serif")
+            .style("font-size", "9px")
+            .attr("text-anchor", function(d) { return d.angle > Math.PI ? "end" : null; })
+            .attr("transform", function(d) {
+              return "rotate(" + (d.angle * 180 / Math.PI - 90) + ")"
+                  + "translate(" + (r0 + 26) + ")"
+                  + (d.angle > Math.PI ? "rotate(180)" : "");
+            })
+            .text(function(d) { return rdr(d).gname; });
+
+          var chordPaths = svg.selectAll("path.chord")
+                .data(chord.chords())
+              .enter().append("svg:path")
+                .attr("class", "chord")
+                .style("stroke", "grey")
+                .style("fill", function(d) { return _.where(mmap, {id: d.source.index })[0].data;; })
+                .attr("d", d3.svg.chord().radius(r0))
+                .on("mouseover", function (d) {
+                  d3.select("#tooltip")
+                    .style("visibility", "visible")
+                    .html(chordTip(rdr(d)))
+                    .style("top", function () { return (d3.event.pageY - 100)+"px"})
+                    .style("left", function () { return (d3.event.pageX - 100)+"px";})
+                })
+                .on("mouseout", function (d) { d3.select("#tooltip").style("visibility", "hidden") });
+
+          function chordTip (d) {
+            //var p = d3.format(".1%"), q = d3.format(",.2r")
+            return "Chord Info:<br/>"
+              +  d.sname + " → " + d.tname
+              + ": " + p(d.svalue) + "<br/>"
+              + d.tname + " → " + d.sname
+              + ": " + d.tvalue + "<br/>";
+          }
+
+          function groupTip (d) {
+            var p = d3.format(",d"), q = d3.format(",d")
+            return "Street Name: "
+                + d.gname;
+            }
+
+          function mouseover(d, i) {
+            d3.select("#tooltip")
+              .style("visibility", "visible")
+              .html(groupTip(rdr(d)))
+              .style("top", function () { return (d3.event.pageY - 80)+"px"})
+              .style("left", function () { return (d3.event.pageX - 130)+"px";})
+
+            chordPaths.classed("fade", function(p) {
+              return p.source.index != i
+                  && p.target.index != i;
+            });
+          }
+      }
+    </script>
+  </body>
+</html>
